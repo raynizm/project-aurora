@@ -58,6 +58,9 @@ public class AuroraChatPanel extends JPanel {
     // Clipboard service — handles read/write to system clipboard
     private se.tcmt.aurora.clipboard.ClipboardService clipboardService;
 
+    // Tool service — manages language model tools for function calling
+    private se.tcmt.aurora.tool.ToolService toolService;
+
     public AuroraChatPanel(@NotNull Project project) {
         this.project = project;
         setLayout(new BorderLayout());
@@ -68,6 +71,7 @@ public class AuroraChatPanel extends JPanel {
         initDocumentManager();
         initSearchService();
         initClipboardService();
+        initToolService();
     }
 
     /**
@@ -205,6 +209,9 @@ public class AuroraChatPanel extends JPanel {
                 case "clipboard":
                     handleClipboardCommand(obj);
                     break;
+                case "tool":
+                    handleToolCommand(obj);
+                    break;
                 default:
                     LOG.debug("Unknown message type from webview: " + type);
             }
@@ -276,6 +283,18 @@ public class AuroraChatPanel extends JPanel {
             LOG.debug("ClipboardService initialized");
         } catch (Exception e) {
             LOG.error("Failed to initialize ClipboardService", e);
+        }
+    }
+
+    /**
+     * Initialize tool service for language model function calling.
+     */
+    private void initToolService() {
+        try {
+            toolService = project.getService(se.tcmt.aurora.tool.ToolService.class);
+            LOG.debug("ToolService initialized with " + toolService.getToolCount() + " tools");
+        } catch (Exception e) {
+            LOG.error("Failed to initialize ToolService", e);
         }
     }
 
@@ -692,6 +711,122 @@ public class AuroraChatPanel extends JPanel {
             LOG.error("Failed to write to clipboard", e);
             sendToWebview("{\"type\":\"error\",\"message\":\"Failed to write to clipboard: " + escapeJson(e.getMessage()) + "\"}");
         }
+    }
+
+    /**
+     * Handle tool commands from webview (invoke, list tools).
+     */
+    private void handleToolCommand(@NotNull com.google.gson.JsonObject obj) {
+        if (toolService == null) {
+            sendToWebview("{\"type\":\"error\",\"message\":\"Tool service not available\"}");
+            return;
+        }
+
+        try {
+            String action = obj.has("action") ? obj.get("action").getAsString() : "";
+
+            switch (action) {
+                case "invoke":
+                    handleInvokeTool(obj);
+                    break;
+                case "list":
+                    handleListTools();
+                    break;
+                default:
+                    LOG.debug("Unknown tool action: " + action);
+                    sendToWebview("{\"type\":\"error\",\"message\":\"Unknown tool action: \" + action}");
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to handle tool command", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to handle tool command: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle invoke tool command.
+     */
+    private void handleInvokeTool(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String toolId = obj.has("toolId") ? obj.get("toolId").getAsString() : "";
+            
+            if (toolId.isEmpty()) {
+                sendToWebview("{\"type\":\"error\",\"message\":\"Tool ID is required\"}");
+                return;
+            }
+
+            // Get parameters (optional)
+            com.google.gson.JsonObject finalParams = null;
+            if (obj.has("params") && !obj.get("params").isJsonNull()) {
+                finalParams = obj.getAsJsonObject("params");
+            }
+
+            LOG.info("[Tool] Invoking tool: " + toolId);
+
+            // Send "tool started" status to webview
+            sendToWebview("{\"type\":\"toolStarted\",\"toolId\":\"" + escapeJson(toolId) + "\"}");
+
+            // Invoke tool asynchronously
+            invokeToolAsync(toolId, finalParams);
+
+        } catch (Exception e) {
+            LOG.error("Failed to invoke tool", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to invoke tool: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle list tools command.
+     */
+    private void handleListTools() {
+        try {
+            List<String> toolList = toolService.getTools();
+            
+            // Build JSON array of tools
+            StringBuilder jsonTools = new StringBuilder("[");
+            boolean first = true;
+            for (String toolJson : toolList) {
+                if (!first) jsonTools.append(",");
+                jsonTools.append(toolJson);
+                first = false;
+            }
+            jsonTools.append("]");
+
+            sendToWebview("{\"type\":\"toolList\",\"tools\":" + jsonTools.toString() + 
+                    ",\"count\":" + toolService.getToolCount() + "}");
+            
+            LOG.debug("[Tool] Listed " + toolService.getToolCount() + " tools for webview");
+        } catch (Exception e) {
+            LOG.error("Failed to list tools", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to list tools: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Invoke a tool asynchronously in a background thread.
+     */
+    private void invokeToolAsync(@NotNull String toolId, 
+                                  @Nullable com.google.gson.JsonObject params) {
+        new Thread(() -> {
+            try {
+                se.tcmt.aurora.tool.ToolInvocationResult result = 
+                        toolService.invokeTool(toolId, params);
+
+                if (result.isSuccess()) {
+                    sendToWebview("{\"type\":\"toolComplete\",\"toolId\":\"" + escapeJson(toolId) + 
+                            "\",\"success\":true,\"data\":" + escapeJson(result.toJson()) + "}");
+                    LOG.info("[Tool] Tool '" + toolId + "' completed successfully");
+                } else {
+                    sendToWebview("{\"type\":\"toolError\",\"toolId\":\"" + escapeJson(toolId) + 
+                            "\",\"message\":\"" + escapeJson(result.getMessage()) + "\"}");
+                    LOG.warn("[Tool] Tool '" + toolId + "' failed: " + result.getMessage());
+                }
+
+            } catch (Exception e) {
+                sendToWebview("{\"type\":\"toolError\",\"toolId\":\"" + escapeJson(toolId) + 
+                        "\",\"message\":\"" + escapeJson(e.getMessage()) + "\"}");
+                LOG.error("[Tool] Error invoking tool '" + toolId + "'", e);
+            }
+        }).start();
     }
 
     /**
