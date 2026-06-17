@@ -364,6 +364,13 @@ public class AuroraChatPanel extends JPanel {
     }
 
     /**
+     * Public method to send a message to the webview from external actions.
+     */
+    public void postMessage(@NotNull String jsonMessage) {
+        sendToWebview(jsonMessage);
+    }
+
+    /**
      * Escape a string for safe JSON embedding.
      */
     private static String escapeJson(@NotNull String text) {

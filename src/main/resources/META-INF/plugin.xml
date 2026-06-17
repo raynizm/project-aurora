@@ -44,5 +44,31 @@
                 description="Open the Aurora AI Assistant tool window">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
+
+        <!-- Right-click code actions -->
+        <group id="Aurora.CodeActions" text="Aurora" popup="true">
+            <add-to-group group-id="EditorPopupMenu" anchor="before" relative-to-action="Copy"/>
+            
+            <action id="Aurora.ExplainCode"
+                    class="se.tcmt.aurora.actions.ExplainCodeAction"
+                    text="Explain Code"
+                    description="Explain the selected code using Aurora AI">
+                <add-to-group group-id="Aurora.CodeActions" anchor="first"/>
+            </action>
+            
+            <action id="Aurora.FixCode"
+                    class="se.tcmt.aurora.actions.FixCodeAction"
+                    text="Fix Issues"
+                    description="Fix issues in the selected code using Aurora AI">
+                <add-to-group group-id="Aurora.CodeActions"/>
+            </action>
+            
+            <action id="Aurora.ImproveCode"
+                    class="se.tcmt.aurora.actions.ImproveCodeAction"
+                    text="Improve Code"
+                    description="Improve the selected code using Aurora AI">
+                <add-to-group group-id="Aurora.CodeActions"/>
+            </action>
+        </group>
     </actions>
 </idea-plugin>
