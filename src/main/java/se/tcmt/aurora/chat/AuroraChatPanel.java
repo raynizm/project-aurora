@@ -55,6 +55,9 @@ public class AuroraChatPanel extends JPanel {
     // Search service — handles file search across project
     private se.tcmt.aurora.search.SearchService searchService;
 
+    // Clipboard service — handles read/write to system clipboard
+    private se.tcmt.aurora.clipboard.ClipboardService clipboardService;
+
     public AuroraChatPanel(@NotNull Project project) {
         this.project = project;
         setLayout(new BorderLayout());
@@ -64,6 +67,7 @@ public class AuroraChatPanel extends JPanel {
         initTerminalManager();
         initDocumentManager();
         initSearchService();
+        initClipboardService();
     }
 
     /**
@@ -198,6 +202,9 @@ public class AuroraChatPanel extends JPanel {
                 case "search":
                     handleSearchCommand(obj);
                     break;
+                case "clipboard":
+                    handleClipboardCommand(obj);
+                    break;
                 default:
                     LOG.debug("Unknown message type from webview: " + type);
             }
@@ -257,6 +264,18 @@ public class AuroraChatPanel extends JPanel {
             LOG.debug("SearchService initialized");
         } catch (Exception e) {
             LOG.error("Failed to initialize SearchService", e);
+        }
+    }
+
+    /**
+     * Initialize clipboard service for system clipboard operations.
+     */
+    private void initClipboardService() {
+        try {
+            clipboardService = new se.tcmt.aurora.clipboard.ClipboardService();
+            LOG.debug("ClipboardService initialized");
+        } catch (Exception e) {
+            LOG.error("Failed to initialize ClipboardService", e);
         }
     }
 
@@ -602,6 +621,76 @@ public class AuroraChatPanel extends JPanel {
         } catch (Exception e) {
             LOG.error("Failed to start search", e);
             sendToWebview("{\"type\":\"error\",\"message\":\"Failed to start search: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle clipboard commands from webview (read, write).
+     */
+    private void handleClipboardCommand(@NotNull com.google.gson.JsonObject obj) {
+        if (clipboardService == null) {
+            sendToWebview("{\"type\":\"error\",\"message\":\"Clipboard service not available\"}");
+            return;
+        }
+
+        try {
+            String action = obj.has("action") ? obj.get("action").getAsString() : "";
+
+            switch (action) {
+                case "read":
+                    handleReadClipboard();
+                    break;
+                case "write":
+                    handleWriteClipboard(obj);
+                    break;
+                default:
+                    LOG.debug("Unknown clipboard action: " + action);
+                    sendToWebview("{\"type\":\"error\",\"message\":\"Unknown clipboard action: \" + action}");
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to handle clipboard command", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to handle clipboard command: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle read clipboard command.
+     */
+    private void handleReadClipboard() {
+        try {
+            String text = clipboardService.readText();
+            
+            if (text != null) {
+                sendToWebview("{\"type\":\"clipboardContent\",\"content\":" + escapeJson(text) + "}");
+                LOG.debug("[Clipboard] Read " + text.length() + " characters from system clipboard");
+            } else {
+                sendToWebview("{\"type\":\"clipboardEmpty\"}");
+                LOG.debug("[Clipboard] Clipboard is empty or contains non-text data");
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to read clipboard", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to read clipboard: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle write clipboard command.
+     */
+    private void handleWriteClipboard(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String content = obj.has("content") ? obj.get("content").getAsString() : "";
+            
+            if (content.isEmpty()) {
+                sendToWebview("{\"type\":\"error\",\"message\":\"Content is empty\"}");
+                return;
+            }
+
+            clipboardService.writeText(content);
+            sendToWebview("{\"type\":\"clipboardWritten\",\"length\":" + content.length() + "}");
+            LOG.debug("[Clipboard] Wrote " + content.length() + " characters to system clipboard");
+        } catch (Exception e) {
+            LOG.error("Failed to write to clipboard", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to write to clipboard: " + escapeJson(e.getMessage()) + "\"}");
         }
     }
 
