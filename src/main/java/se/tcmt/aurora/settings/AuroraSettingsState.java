@@ -8,7 +8,6 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * Persistent settings for Aurora plugin.
- * Note: API key is stored in plain text in the IDE settings file.
  */
 @State(
     name = "auroraSettings",
@@ -20,6 +19,7 @@ public class AuroraSettingsState implements PersistentStateComponent<AuroraSetti
     private static final String DEFAULT_MODEL = "gpt-4o-mini";
     private static final double DEFAULT_TEMPERATURE = 0.7;
     private static final int DEFAULT_MAX_TOKENS = 4096;
+    private static final String DEFAULT_SYSTEM_PROMPT = "You are Aurora, an AI coding assistant integrated into IntelliJ IDEA. You help users write, debug, and understand code.";
 
     @Nullable
     private String apiKey;
@@ -28,6 +28,7 @@ public class AuroraSettingsState implements PersistentStateComponent<AuroraSetti
     private String model = DEFAULT_MODEL;
     private double temperature = DEFAULT_TEMPERATURE;
     private int maxTokens = DEFAULT_MAX_TOKENS;
+    private String systemPrompt = DEFAULT_SYSTEM_PROMPT;
 
     @Nullable
     public static AuroraSettingsState getInstance() {
@@ -85,6 +86,15 @@ public class AuroraSettingsState implements PersistentStateComponent<AuroraSetti
 
     public void setMaxTokens(int maxTokens) {
         this.maxTokens = Math.max(256, Math.min(8192, maxTokens));
+    }
+
+    @Nullable
+    public String getSystemPrompt() {
+        return systemPrompt;
+    }
+
+    public void setSystemPrompt(@Nullable String systemPrompt) {
+        this.systemPrompt = systemPrompt != null ? systemPrompt : DEFAULT_SYSTEM_PROMPT;
     }
 
     /**

@@ -13,9 +13,10 @@ public class AuroraSettingsConfigurable implements Configurable {
     private JPanel mainPanel;
     private JPasswordField apiKeyField;
     private JTextField baseUrlField;
-    private JTextField modelField;
+    private JComboBox<String> modelComboBox;
     private JSpinner temperatureSpinner;
     private JSpinner maxTokensSpinner;
+    private JTextArea systemPromptArea;
     private JButton testButton;
     private JLabel statusLabel;
 
@@ -55,14 +56,15 @@ public class AuroraSettingsConfigurable implements Configurable {
         baseUrlField.setText("https://api.openai.com/v1");
         mainPanel.add(baseUrlField, gbc);
 
-        // Model
+        // Model Selection Dropdown
         row++;
         gbc.gridx = 0; gbc.gridy = row; gbc.anchor = GridBagConstraints.WEST; gbc.weightx = 0;
         mainPanel.add(new JLabel("Model:"), gbc);
         gbc.gridx = 1; gbc.weightx = 1.0;
-        modelField = new JTextField(30);
-        modelField.setText("gpt-4o-mini");
-        mainPanel.add(modelField, gbc);
+        String[] models = {"gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo", "claude-3-haiku", "claude-3-sonnet", "custom"};
+        modelComboBox = new JComboBox<>(models);
+        modelComboBox.setEditable(true);
+        mainPanel.add(modelComboBox, gbc);
 
         // Temperature
         row++;
@@ -81,6 +83,17 @@ public class AuroraSettingsConfigurable implements Configurable {
         SpinnerNumberModel tokenModel = new SpinnerNumberModel(4096, 256, 8192, 256);
         maxTokensSpinner = new JSpinner(tokenModel);
         mainPanel.add(maxTokensSpinner, gbc);
+
+        // System Prompt
+        row++;
+        gbc.gridx = 0; gbc.gridy = row; gbc.anchor = GridBagConstraints.WEST; gbc.weightx = 0;
+        mainPanel.add(new JLabel("System Prompt:"), gbc);
+        gbc.gridx = 1; gbc.weightx = 1.0;
+        systemPromptArea = new JTextArea(4, 30);
+        systemPromptArea.setLineWrap(true);
+        systemPromptArea.setWrapStyleWord(true);
+        JScrollPane scrollPane = new JScrollPane(systemPromptArea);
+        mainPanel.add(scrollPane, gbc);
 
         // Test Connection Button
         row++;
@@ -162,7 +175,7 @@ public class AuroraSettingsConfigurable implements Configurable {
         char[] pwd = apiKeyField.getPassword();
         config.setApiKey(new String(pwd));
         config.setBaseUrl(baseUrlField.getText());
-        config.setModel(modelField.getText());
+        config.setModel((String) modelComboBox.getSelectedItem());
         config.setTemperature(((Double) temperatureSpinner.getValue()).doubleValue());
         config.setMaxTokens((Integer) maxTokensSpinner.getValue());
         return config;
@@ -175,9 +188,10 @@ public class AuroraSettingsConfigurable implements Configurable {
         String key = new String(pwd);
         return !key.equals(settings.getApiKey())
             || !baseUrlField.getText().equals(settings.getBaseUrl())
-            || !modelField.getText().equals(settings.getModel())
+            || !modelComboBox.getSelectedItem().toString().equals(settings.getModel())
             || ((Double) temperatureSpinner.getValue()).doubleValue() != settings.getTemperature()
-            || ((Integer) maxTokensSpinner.getValue()).intValue() != settings.getMaxTokens();
+            || ((Integer) maxTokensSpinner.getValue()).intValue() != settings.getMaxTokens()
+            || !systemPromptArea.getText().equals(settings.getSystemPrompt());
     }
 
     @Override
@@ -200,9 +214,10 @@ public class AuroraSettingsConfigurable implements Configurable {
         AuroraSettingsState settings = AuroraSettingsState.getInstance();
         settings.setApiKey(key);
         settings.setBaseUrl(baseUrlField.getText());
-        settings.setModel(modelField.getText());
+        settings.setModel((String) modelComboBox.getSelectedItem());
         settings.setTemperature(((Double) temperatureSpinner.getValue()).doubleValue());
         settings.setMaxTokens((Integer) maxTokensSpinner.getValue());
+        settings.setSystemPrompt(systemPromptArea.getText());
         
         statusLabel.setText("Settings saved successfully");
         statusLabel.setForeground(new Color(80, 200, 120));
@@ -213,9 +228,10 @@ public class AuroraSettingsConfigurable implements Configurable {
         AuroraSettingsState settings = AuroraSettingsState.getInstance();
         apiKeyField.setText(settings.getApiKey());
         baseUrlField.setText(settings.getBaseUrl());
-        modelField.setText(settings.getModel());
+        modelComboBox.setSelectedItem(settings.getModel());
         temperatureSpinner.setValue(settings.getTemperature());
         maxTokensSpinner.setValue(settings.getMaxTokens());
+        systemPromptArea.setText(settings.getSystemPrompt());
         statusLabel.setText("");
     }
 
