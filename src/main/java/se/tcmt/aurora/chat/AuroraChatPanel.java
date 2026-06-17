@@ -46,12 +46,16 @@ public class AuroraChatPanel extends JPanel {
     // Theme sync — monitors IDE dark/light changes and pushes CSS vars to WebView
     private se.tcmt.aurora.theme.ThemeSync themeSync;
 
+    // Terminal manager — manages terminal instances for command execution
+    private se.tcmt.aurora.terminal.TerminalManager terminalManager;
+
     public AuroraChatPanel(@NotNull Project project) {
         this.project = project;
         setLayout(new BorderLayout());
         setBackground(UIUtil.getPanelBackground());
 
         createWebView();
+        initTerminalManager();
     }
 
     /**
@@ -180,6 +184,9 @@ public class AuroraChatPanel extends JPanel {
                 case "message":
                     handleUserMessage(obj.get("content").getAsString());
                     break;
+                case "terminal":
+                    handleTerminalCommand(obj);
+                    break;
                 default:
                     LOG.debug("Unknown message type from webview: " + type);
             }
@@ -203,6 +210,18 @@ public class AuroraChatPanel extends JPanel {
             });
         } catch (Exception e) {
             LOG.error("Failed to initialize theme sync", e);
+        }
+    }
+
+    /**
+     * Initialize terminal manager for command execution.
+     */
+    private void initTerminalManager() {
+        try {
+            terminalManager = project.getService(se.tcmt.aurora.terminal.TerminalManager.class);
+            LOG.debug("TerminalManager initialized");
+        } catch (Exception e) {
+            LOG.error("Failed to initialize TerminalManager", e);
         }
     }
 
@@ -398,6 +417,78 @@ public class AuroraChatPanel extends JPanel {
      */
     public void setSettingsState(se.tcmt.aurora.settings.AuroraSettingsState settings) {
         this.settingsState = settings;
+    }
+
+    /**
+     * Handle terminal commands from webview (create, send command, etc.).
+     */
+    private void handleTerminalCommand(@NotNull com.google.gson.JsonObject obj) {
+        String action = obj.has("action") ? obj.get("action").getAsString() : "";
+
+        switch (action) {
+            case "create":
+                handleCreateTerminal(obj);
+                break;
+            case "send":
+                handleSendCommand(obj);
+                break;
+            case "close":
+                handleCloseTerminal();
+                break;
+            default:
+                LOG.debug("Unknown terminal action: " + action);
+        }
+    }
+
+    /**
+     * Handle create terminal command.
+     */
+    private void handleCreateTerminal(@NotNull com.google.gson.JsonObject obj) {
+        if (terminalManager == null) {
+            sendToWebview("{\"type\":\"error\",\"message\":\"Terminal service not available\"}");
+            return;
+        }
+
+        try {
+            String name = obj.has("name") ? obj.get("name").getAsString() : "Aurora Terminal";
+            terminalManager.createTerminal(name);
+            sendToWebview("{\"type\":\"terminalCreated\",\"message\":\"Terminal created: \" + \"" + name + "\"}");
+            LOG.info("Terminal created via webview: " + name);
+        } catch (Exception e) {
+            LOG.error("Failed to create terminal", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to create terminal: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle send command to terminal.
+     */
+    private void handleSendCommand(@NotNull com.google.gson.JsonObject obj) {
+        if (terminalManager == null) {
+            sendToWebview("{\"type\":\"error\",\"message\":\"Terminal service not available\"}");
+            return;
+        }
+
+        try {
+            String command = obj.has("command") ? obj.get("command").getAsString() : "";
+            boolean shouldExecute = obj.has("execute") && obj.get("execute").getAsBoolean();
+
+            terminalManager.sendTextToFirst(command, shouldExecute);
+            sendToWebview("{\"type\":\"terminalOutput\",\"message\":\"Command sent: " + escapeJson(command) + "\"}");
+        } catch (Exception e) {
+            LOG.error("Failed to send command to terminal", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to send command: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle close all terminals.
+     */
+    private void handleCloseTerminal() {
+        if (terminalManager != null) {
+            terminalManager.closeAllTerminals();
+            sendToWebview("{\"type\":\"terminalsClosed\",\"message\":\"All terminals closed\"}");
+        }
     }
 
     /**
