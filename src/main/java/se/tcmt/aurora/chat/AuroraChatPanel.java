@@ -52,6 +52,9 @@ public class AuroraChatPanel extends JPanel {
     // Document manager — handles document sync and workspace edits
     private se.tcmt.aurora.document.DocumentManager documentManager;
 
+    // Search service — handles file search across project
+    private se.tcmt.aurora.search.SearchService searchService;
+
     public AuroraChatPanel(@NotNull Project project) {
         this.project = project;
         setLayout(new BorderLayout());
@@ -60,6 +63,7 @@ public class AuroraChatPanel extends JPanel {
         createWebView();
         initTerminalManager();
         initDocumentManager();
+        initSearchService();
     }
 
     /**
@@ -191,6 +195,9 @@ public class AuroraChatPanel extends JPanel {
                 case "terminal":
                     handleTerminalCommand(obj);
                     break;
+                case "search":
+                    handleSearchCommand(obj);
+                    break;
                 default:
                     LOG.debug("Unknown message type from webview: " + type);
             }
@@ -238,6 +245,18 @@ public class AuroraChatPanel extends JPanel {
             LOG.debug("DocumentManager initialized");
         } catch (Exception e) {
             LOG.error("Failed to initialize DocumentManager", e);
+        }
+    }
+
+    /**
+     * Initialize search service for file search across project.
+     */
+    private void initSearchService() {
+        try {
+            searchService = project.getService(se.tcmt.aurora.search.SearchService.class);
+            LOG.debug("SearchService initialized");
+        } catch (Exception e) {
+            LOG.error("Failed to initialize SearchService", e);
         }
     }
 
@@ -504,6 +523,85 @@ public class AuroraChatPanel extends JPanel {
         if (terminalManager != null) {
             terminalManager.closeAllTerminals();
             sendToWebview("{\"type\":\"terminalsClosed\",\"message\":\"All terminals closed\"}");
+        }
+    }
+
+    /**
+     * Handle search commands from webview.
+     */
+    private void handleSearchCommand(@NotNull com.google.gson.JsonObject obj) {
+        if (searchService == null) {
+            sendToWebview("{\"type\":\"error\",\"message\":\"Search service not available\"}");
+            return;
+        }
+
+        try {
+            String pattern = obj.has("pattern") ? obj.get("pattern").getAsString() : "";
+            boolean caseSensitive = obj.has("caseSensitive") && obj.get("caseSensitive").getAsBoolean();
+            boolean useRegex = obj.has("useRegex") && obj.get("useRegex").getAsBoolean();
+
+            if (pattern.isEmpty()) {
+                sendToWebview("{\"type\":\"error\",\"message\":\"Search pattern is empty\"}");
+                return;
+            }
+
+            // Start search session
+            se.tcmt.aurora.search.SearchSession session = searchService.startSearch(pattern, caseSensitive, useRegex);
+
+            LOG.info("Search started: #" + session.getSessionId() + " pattern='" + pattern + "'");
+
+            // Send initial response to webview
+            sendToWebview("{\"type\":\"searchStarted\",\"sessionId\":" + session.getSessionId() + ",\"pattern\":\"" + escapeJson(pattern) + "\"}");
+
+            // Poll for results (in a separate thread to avoid blocking)
+            new Thread(() -> {
+                try {
+                    int pollCount = 0;
+                    while (!session.isCompleted() && pollCount < 100) {
+                        Thread.sleep(200);
+                        pollCount++;
+
+                        // Send progress update if callback is set
+                        if (pollCount % 5 == 0) {
+                            sendToWebview("{\"type\":\"searchProgress\",\"sessionId\":" + session.getSessionId() + ",\"filesScanned\":" + session.getFilesScanned() + "}");
+                        }
+                    }
+
+                    // Get results when complete
+                    java.util.List<se.tcmt.aurora.search.SearchResult> results = searchService.getResults(session.getSessionId());
+
+                    if (results != null && !results.isEmpty()) {
+                        // Build JSON array of results
+                        StringBuilder jsonResults = new StringBuilder("[");
+                        boolean first = true;
+                        for (se.tcmt.aurora.search.SearchResult result : results) {
+                            if (!first) jsonResults.append(",");
+                            jsonResults.append("{")
+                                    .append("\"file\":\"").append(escapeJson(result.getFilePath())).append("\",")
+                                    .append("\"line\":").append(result.getLineNumber()).append(",")
+                                    .append("\"column\":").append(result.getColumnNumber()).append(",")
+                                    .append("\"matchedText\":\"").append(escapeJson(result.getMatchedText())).append("\",")
+                                    .append("\"contextBefore\":\"").append(escapeJson(result.getContextBefore())).append("\",")
+                                    .append("\"contextAfter\":\"").append(escapeJson(result.getContextAfter())).append("\"}")
+                                    .append("}");
+                            first = false;
+                        }
+                        jsonResults.append("]");
+
+                        sendToWebview("{\"type\":\"searchComplete\",\"sessionId\":" + session.getSessionId() + ",\"results\":" + jsonResults.toString() + ",\"total\":" + results.size() + "}");
+                    } else {
+                        sendToWebview("{\"type\":\"searchComplete\",\"sessionId\":" + session.getSessionId() + ",\"results\":[],\"total\":0}");
+                    }
+
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    LOG.debug("Search polling interrupted");
+                }
+            }).start();
+
+        } catch (Exception e) {
+            LOG.error("Failed to start search", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to start search: " + escapeJson(e.getMessage()) + "\"}");
         }
     }
 
