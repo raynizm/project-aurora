@@ -49,6 +49,9 @@ public class AuroraChatPanel extends JPanel {
     // Terminal manager — manages terminal instances for command execution
     private se.tcmt.aurora.terminal.TerminalManager terminalManager;
 
+    // Document manager — handles document sync and workspace edits
+    private se.tcmt.aurora.document.DocumentManager documentManager;
+
     public AuroraChatPanel(@NotNull Project project) {
         this.project = project;
         setLayout(new BorderLayout());
@@ -56,6 +59,7 @@ public class AuroraChatPanel extends JPanel {
 
         createWebView();
         initTerminalManager();
+        initDocumentManager();
     }
 
     /**
@@ -222,6 +226,18 @@ public class AuroraChatPanel extends JPanel {
             LOG.debug("TerminalManager initialized");
         } catch (Exception e) {
             LOG.error("Failed to initialize TerminalManager", e);
+        }
+    }
+
+    /**
+     * Initialize document manager for file sync and workspace edits.
+     */
+    private void initDocumentManager() {
+        try {
+            documentManager = project.getService(se.tcmt.aurora.document.DocumentManager.class);
+            LOG.debug("DocumentManager initialized");
+        } catch (Exception e) {
+            LOG.error("Failed to initialize DocumentManager", e);
         }
     }
 
