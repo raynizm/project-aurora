@@ -20,6 +20,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -41,6 +42,9 @@ public class AuroraChatPanel extends JPanel {
     // JCEF browser instance
     private JBCefBrowser browser;
     private JBCefJSQuery jsQuery;
+
+    // Theme sync — monitors IDE dark/light changes and pushes CSS vars to WebView
+    private se.tcmt.aurora.theme.ThemeSync themeSync;
 
     public AuroraChatPanel(@NotNull Project project) {
         this.project = project;
@@ -73,6 +77,9 @@ public class AuroraChatPanel extends JPanel {
 
             // Set up JS bridge for receiving messages from JavaScript
             setupJsBridge();
+
+            // Initialize theme sync — detects IDE dark/light and pushes CSS vars to WebView
+            initThemeSync();
 
             // Register load handler using CEF's native adapter (Roo-Code pattern)
             browser.getJBCefClient().addLoadHandler(new CefLoadHandlerAdapter() {
@@ -179,6 +186,52 @@ public class AuroraChatPanel extends JPanel {
         } catch (Exception e) {
             LOG.error("Error handling message from webview", e);
         }
+    }
+
+    /**
+     * Initialize theme sync — monitors IDE dark/light changes and pushes CSS vars to WebView.
+     */
+    private void initThemeSync() {
+        try {
+            themeSync = new se.tcmt.aurora.theme.ThemeSync(project);
+            themeSync.registerListener((isDark, cssVars) -> {
+                LOG.debug("Theme changed: " + (isDark ? "dark" : "light") + ", vars=" + cssVars.size());
+                sendThemeToWebview(isDark, cssVars);
+            });
+        } catch (Exception e) {
+            LOG.error("Failed to initialize theme sync", e);
+        }
+    }
+
+    /**
+     * Send theme CSS variables to the webview.
+     */
+    private void sendThemeToWebview(boolean isDark, @NotNull Map<String, String> cssVars) {
+        if (browser == null || browser.getCefBrowser() == null) return;
+
+        // Build JSON object of CSS vars
+        StringBuilder json = new StringBuilder("{");
+        boolean first = true;
+        for (Map.Entry<String, String> entry : cssVars.entrySet()) {
+            if (!first) json.append(",");
+            json.append("\"").append(entry.getKey()).append("\":\"").append(entry.getValue()).append("\"");
+            first = false;
+        }
+        json.append("}");
+
+        SwingUtilities.invokeLater(() -> {
+            String script = """
+                if (window.Aurora && window.Aurora.onThemeChange) {
+                    window.Aurora.onThemeChange(%s, %b);
+                }
+            """.formatted(json.toString(), isDark);
+
+            browser.getCefBrowser().executeJavaScript(
+                    script,
+                    browser.getCefBrowser().getURL(),
+                    0
+            );
+        });
     }
 
     /**
