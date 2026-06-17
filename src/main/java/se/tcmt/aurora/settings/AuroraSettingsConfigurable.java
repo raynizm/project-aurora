@@ -2,7 +2,6 @@ package se.tcmt.aurora.settings;
 
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.NlsContexts;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
 import javax.swing.*;

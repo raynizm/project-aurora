@@ -1,27 +1,38 @@
 package se.tcmt.aurora.settings;
 
-import com.intellij.credentialStore.Credentials;
-import com.intellij.ide.passwordSafe.PasswordSafe;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+/**
+ * Persistent settings for Aurora plugin.
+ * Note: API key is stored in plain text in the IDE settings file.
+ */
 @State(
-    name = "AuroraSettings",
-    storages = @Storage("aurora-settings.xml")
+    name = "auroraSettings",
+    storages = @Storage("aurora.xml")
 )
 public class AuroraSettingsState implements PersistentStateComponent<AuroraSettingsState> {
 
-    private static final String KEY_STORE_SERVICE = "Aurora.APIKey";
+    private static final String DEFAULT_BASE_URL = "https://api.openai.com/v1";
+    private static final String DEFAULT_MODEL = "gpt-4o-mini";
+    private static final double DEFAULT_TEMPERATURE = 0.7;
+    private static final int DEFAULT_MAX_TOKENS = 4096;
+
+    @Nullable
+    private String apiKey;
     
-    // Settings that are NOT encrypted (stored in XML)
-    private String baseUrl = "https://api.openai.com/v1";
-    private String model = "gpt-4o-mini";
-    private double temperature = 0.7;
-    private int maxTokens = 4096;
+    private String baseUrl = DEFAULT_BASE_URL;
+    private String model = DEFAULT_MODEL;
+    private double temperature = DEFAULT_TEMPERATURE;
+    private int maxTokens = DEFAULT_MAX_TOKENS;
+
+    @Nullable
+    public static AuroraSettingsState getInstance() {
+        return com.intellij.openapi.components.ServiceManager.getService(AuroraSettingsState.class);
+    }
 
     @Nullable
     @Override
@@ -34,57 +45,55 @@ public class AuroraSettingsState implements PersistentStateComponent<AuroraSetti
         com.intellij.util.xmlb.XmlSerializerUtil.copyBean(state, this);
     }
 
-    public static @NotNull AuroraSettingsState getInstance() {
-        return ApplicationManager.getApplication().getService(AuroraSettingsState.class);
+    // Getters and setters
+    @Nullable
+    public String getApiKey() {
+        return apiKey;
     }
 
-    // API Key methods - uses PasswordSafe for secure storage
-    public void setApiKey(@NotNull String apiKey) {
-        if (apiKey == null || apiKey.isEmpty()) {
-            PasswordSafe.getInstance().getCredentials(KEY_STORE_SERVICE, KEY_STORE_SERVICE);
-            PasswordSafe.getInstance().setCredentials(new Credentials(KEY_STORE_SERVICE, ""));
-        } else {
-            PasswordSafe.getInstance().setCredentials(new Credentials(KEY_STORE_SERVICE, apiKey));
-        }
+    public void setApiKey(@Nullable String apiKey) {
+        this.apiKey = apiKey;
     }
 
-    public @NotNull String getApiKey() {
-        Credentials creds = PasswordSafe.getInstance().getCredentials(KEY_STORE_SERVICE, KEY_STORE_SERVICE);
-        return creds != null ? creds.getPasswordAsString() : "";
+    public String getBaseUrl() {
+        return baseUrl;
     }
 
-    public boolean hasApiKey() {
-        return !getApiKey().isEmpty();
+    public void setBaseUrl(String baseUrl) {
+        this.baseUrl = baseUrl;
     }
 
-    // Base URL
-    public String getBaseUrl() { return baseUrl; }
-    public void setBaseUrl(@NotNull String baseUrl) { this.baseUrl = baseUrl; }
-
-    // Model
-    public String getModel() { return model; }
-    public void setModel(@NotNull String model) { this.model = model; }
-
-    // Temperature (0.0 - 2.0)
-    public double getTemperature() { return temperature; }
-    public void setTemperature(double temperature) { 
-        if (temperature < 0.0) temperature = 0.0;
-        if (temperature > 2.0) temperature = 2.0;
-        this.temperature = temperature; 
+    public String getModel() {
+        return model;
     }
 
-    // Max Tokens (256 - 8192)
-    public int getMaxTokens() { return maxTokens; }
-    public void setMaxTokens(int maxTokens) { 
-        if (maxTokens < 256) maxTokens = 256;
-        if (maxTokens > 8192) maxTokens = 8192;
-        this.maxTokens = maxTokens; 
+    public void setModel(String model) {
+        this.model = model;
     }
 
-    // Convert to provider config format
+    public double getTemperature() {
+        return temperature;
+    }
+
+    public void setTemperature(double temperature) {
+        this.temperature = Math.max(0.0, Math.min(2.0, temperature));
+    }
+
+    public int getMaxTokens() {
+        return maxTokens;
+    }
+
+    public void setMaxTokens(int maxTokens) {
+        this.maxTokens = Math.max(256, Math.min(8192, maxTokens));
+    }
+
+    /**
+     * Converts settings to ProviderConfig for use by AI providers.
+     */
+    @NotNull
     public se.tcmt.aurora.provider.ProviderConfig toProviderConfig() {
         se.tcmt.aurora.provider.ProviderConfig config = new se.tcmt.aurora.provider.ProviderConfig();
-        config.setApiKey(getApiKey());
+        config.setApiKey(apiKey);
         config.setBaseUrl(baseUrl);
         config.setModel(model);
         config.setTemperature(temperature);
@@ -92,21 +101,24 @@ public class AuroraSettingsState implements PersistentStateComponent<AuroraSetti
         return config;
     }
 
-    // Validate settings
-    public boolean isValid() {
-        return hasApiKey() && !baseUrl.isEmpty() && !model.isEmpty();
-    }
-
-    public String getValidationMessage() {
-        if (!hasApiKey()) {
-            return "API key is required";
+    /**
+     * Updates settings from a ProviderConfig.
+     */
+    public void fromProviderConfig(@NotNull se.tcmt.aurora.provider.ProviderConfig config) {
+        if (config.getApiKey() != null) {
+            setApiKey(config.getApiKey());
         }
-        if (baseUrl.isEmpty()) {
-            return "Base URL is required";
+        if (config.getBaseUrl() != null && !config.getBaseUrl().isEmpty()) {
+            setBaseUrl(config.getBaseUrl());
         }
-        if (model.isEmpty()) {
-            return "Model name is required";
+        if (config.getModel() != null && !config.getModel().isEmpty()) {
+            setModel(config.getModel());
         }
-        return null; // Valid
+        if (config.getTemperature() >= 0.0) {
+            setTemperature(config.getTemperature());
+        }
+        if (config.getMaxTokens() > 0) {
+            setMaxTokens(config.getMaxTokens());
+        }
     }
 }
