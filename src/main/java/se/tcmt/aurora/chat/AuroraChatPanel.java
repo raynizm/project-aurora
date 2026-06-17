@@ -195,7 +195,10 @@ public class AuroraChatPanel extends JPanel {
         try {
             themeSync = new se.tcmt.aurora.theme.ThemeSync(project);
             themeSync.registerListener((isDark, cssVars) -> {
-                LOG.debug("Theme changed: " + (isDark ? "dark" : "light") + ", vars=" + cssVars.size());
+                LOG.info("Theme changed callback: " + (isDark ? "dark" : "light") + ", vars=" + cssVars.size());
+                for (Map.Entry<String, String> entry : cssVars.entrySet()) {
+                    LOG.debug("  " + entry.getKey() + " = " + entry.getValue());
+                }
                 sendThemeToWebview(isDark, cssVars);
             });
         } catch (Exception e) {
@@ -207,7 +210,10 @@ public class AuroraChatPanel extends JPanel {
      * Send theme CSS variables to the webview.
      */
     private void sendThemeToWebview(boolean isDark, @NotNull Map<String, String> cssVars) {
-        if (browser == null || browser.getCefBrowser() == null) return;
+        if (browser == null || browser.getCefBrowser() == null) {
+            LOG.warn("Cannot send theme: browser not ready");
+            return;
+        }
 
         // Build JSON object of CSS vars
         StringBuilder json = new StringBuilder("{");
@@ -219,12 +225,17 @@ public class AuroraChatPanel extends JPanel {
         }
         json.append("}");
 
+        LOG.info("Sending theme to webview: " + (isDark ? "dark" : "light") + ", vars=" + cssVars.size());
+
         SwingUtilities.invokeLater(() -> {
             String script = """
                 if (window.Aurora && window.Aurora.onThemeChange) {
+                    console.log('Aurora.onThemeChange called with', %s, %b);
                     window.Aurora.onThemeChange(%s, %b);
+                } else {
+                    console.error('Aurora.onThemeChange not available');
                 }
-            """.formatted(json.toString(), isDark);
+            """.formatted(json.toString(), isDark, json.toString(), isDark);
 
             browser.getCefBrowser().executeJavaScript(
                     script,

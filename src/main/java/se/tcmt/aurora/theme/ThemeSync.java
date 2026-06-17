@@ -47,12 +47,20 @@ public class ThemeSync implements Disposable {
         this.listener = listener;
         sendInitialTheme();
 
+        // Use message bus to subscribe to LafManager events — fires when user switches themes via Settings → Appearance.
         ApplicationManager.getApplication().getMessageBus()
-                .connect(this)
+                .connect(this)  // connect to this Disposable — auto-unsubscribes on dispose()
                 .subscribe(LafManagerListener.TOPIC, new LafManagerListener() {
+                    private long lastFireTime = 0;
+
                     @Override
                     public void lookAndFeelChanged(@NotNull LafManager source) {
-                        LOG.debug("IDE theme changed detected");
+                        // Debounce: only process once per 500ms to avoid spam during theme switch animation
+                        long now = System.currentTimeMillis();
+                        if (now - lastFireTime < 500) return;
+                        lastFireTime = now;
+
+                        LOG.info("LafManager.lookAndFeelChanged fired");
                         detectCurrentTheme();
                         sendCurrentTheme();
                     }
