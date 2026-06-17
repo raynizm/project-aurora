@@ -328,14 +328,15 @@ public class AuroraChatPanel extends JPanel {
         List<ChatMessage> history = new ArrayList<>(chatHistory);
 
         // Inject context as a system message if available
-        if (context.hasContext()) {
-            String contextPrompt = "You are an AI coding assistant integrated into IntelliJ IDEA.\n\n" +
-                    "The user has the following code context available:\n" +
-                    context.formatForPrompt() + "\n\nPlease use this context when answering.";
+        String contextPrompt = "You are an AI coding assistant integrated into IntelliJ IDEA.\n\n";
 
-            ChatMessage systemMsg = new ChatMessage(ChatMessage.Role.SYSTEM, contextPrompt);
-            history.add(0, systemMsg); // Insert at beginning
+        if (context.hasContext()) {
+            contextPrompt += "The user has the following code context available:\n" +
+                    context.formatForPrompt() + "\n\nPlease use this context when answering.";
         }
+
+        ChatMessage systemMsg = new ChatMessage(ChatMessage.Role.SYSTEM, contextPrompt);
+        history.add(0, systemMsg); // Insert at beginning
 
         return history;
     }
