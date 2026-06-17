@@ -290,11 +290,23 @@
 
                 switch (data.type) {
                     case 'response':
+                        removeStreamingCursor();
                         addMessage('assistant', data.content);
                         isProcessing = false;
                         sendButton.disabled = false;
                         statusBar.textContent = 'Ready';
                         messageInput.focus();
+                        break;
+
+                    case 'token':
+                        // Incremental token update — append to streaming message content
+                        if (isProcessing) {
+                            const existingContent = document.getElementById('streaming-content');
+                            if (existingContent) {
+                                existingContent.textContent += data.content;
+                                chatContainer.scrollTop = chatContainer.scrollHeight;
+                            }
+                        }
                         break;
 
                     case 'error':

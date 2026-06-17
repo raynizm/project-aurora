@@ -222,15 +222,26 @@ public class AuroraChatPanel extends JPanel {
                         return;
                     }
 
-                    // Call provider and stream response
-                    String fullResponse = activeProvider.chat(history, settingsState.toProviderConfig());
+                    // Call provider with streaming callback — tokens sent incrementally to webview
+                    StringBuilder fullResponseBuilder = new StringBuilder();
 
-                    if (fullResponse != null && !fullResponse.isEmpty()) {
+                    String fullResponse = activeProvider.chatStream(history, settingsState.toProviderConfig(), delta -> {
+                        if (delta != null && !delta.isEmpty()) {
+                            fullResponseBuilder.append(delta);
+                            // Send token update to webview for incremental display
+                            sendToWebview("{\"type\":\"token\",\"content\":" + escapeJson(delta) + "}");
+                        }
+                    });
+
+                    String finalResponse = fullResponseBuilder.toString();
+
+                    if (finalResponse != null && !finalResponse.isEmpty()) {
                         // Track assistant message in history
-                        ChatMessage assistantMsg = new ChatMessage(ChatMessage.Role.ASSISTANT, fullResponse);
+                        ChatMessage assistantMsg = new ChatMessage(ChatMessage.Role.ASSISTANT, finalResponse);
                         chatHistory.add(assistantMsg);
 
-                        sendToWebview("{\"type\":\"response\",\"content\":" + escapeJson(fullResponse) + "}");
+                        // Send final response to webview (full accumulated text)
+                        sendToWebview("{\"type\":\"response\",\"content\":" + escapeJson(finalResponse) + "}");
                     } else {
                         sendToWebview("{\"type\":\"error\",\"message\":\"Sorry, I couldn't get a response.\"}");
                     }
