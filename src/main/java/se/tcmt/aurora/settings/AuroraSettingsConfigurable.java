@@ -1,6 +1,7 @@
 package se.tcmt.aurora.settings;
 
 import com.intellij.openapi.options.Configurable;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.NlsContexts;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
@@ -11,11 +12,13 @@ import java.awt.*;
 public class AuroraSettingsConfigurable implements Configurable {
 
     private JPanel mainPanel;
-    private JTextField apiKeyField;
+    private JPasswordField apiKeyField;
     private JTextField baseUrlField;
     private JTextField modelField;
     private JSpinner temperatureSpinner;
     private JSpinner maxTokensSpinner;
+    private JButton testButton;
+    private JLabel statusLabel;
 
     @Nls(capitalization = Nls.Capitalization.Title)
     @Override
@@ -80,6 +83,20 @@ public class AuroraSettingsConfigurable implements Configurable {
         maxTokensSpinner = new JSpinner(tokenModel);
         mainPanel.add(maxTokensSpinner, gbc);
 
+        // Test Connection Button
+        row++;
+        gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.CENTER; gbc.weightx = 1.0;
+        testButton = new JButton("Test Connection");
+        testButton.addActionListener(e -> testConnection());
+        mainPanel.add(testButton, gbc);
+
+        // Status Label
+        row++;
+        gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.WEST; gbc.weightx = 1.0;
+        statusLabel = new JLabel("");
+        statusLabel.setForeground(new Color(120, 130, 140));
+        mainPanel.add(statusLabel, gbc);
+
         // Info label
         row++;
         gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.WEST; gbc.weightx = 1.0;
@@ -90,10 +107,72 @@ public class AuroraSettingsConfigurable implements Configurable {
         return mainPanel;
     }
 
+    private void testConnection() {
+        testButton.setEnabled(false);
+        statusLabel.setText("Testing connection...");
+        statusLabel.setForeground(new Color(120, 130, 140));
+
+        new Thread(() -> {
+            try {
+                se.tcmt.aurora.provider.ProviderConfig config = createProviderConfig();
+                
+                if (!config.hasApiKey()) {
+                    SwingUtilities.invokeLater(() -> {
+                        statusLabel.setText("Error: API key is required");
+                        statusLabel.setForeground(Color.RED);
+                        testButton.setEnabled(true);
+                    });
+                    return;
+                }
+
+                // Create a temporary provider and test
+                se.tcmt.aurora.provider.AiProvider provider = new se.tcmt.aurora.provider.OpenAiProvider();
+                
+                // Send a minimal request to test connectivity
+                java.util.List<se.tcmt.aurora.chat.ChatMessage> testMessages = new java.util.ArrayList<>();
+                testMessages.add(new se.tcmt.aurora.chat.ChatMessage(se.tcmt.aurora.chat.ChatMessage.Role.USER, "Test"));
+                
+                String response = provider.chat(testMessages, config);
+                
+                SwingUtilities.invokeLater(() -> {
+                    if (response != null) {
+                        statusLabel.setText("Connection successful! Response received.");
+                        statusLabel.setForeground(new Color(80, 200, 120));
+                        Messages.showInfoMessage("Test connection successful!\nThe AI provider is responding correctly.", "Aurora Connection Test");
+                    } else {
+                        statusLabel.setText("Error: No response from API");
+                        statusLabel.setForeground(Color.RED);
+                        Messages.showErrorDialog("The API did not return a valid response. Check your settings and try again.", "Aurora Connection Test");
+                    }
+                    testButton.setEnabled(true);
+                });
+                
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> {
+                    statusLabel.setText("Error: " + e.getMessage());
+                    statusLabel.setForeground(Color.RED);
+                    Messages.showErrorDialog("Connection failed: " + e.getMessage(), "Aurora Connection Test");
+                    testButton.setEnabled(true);
+                });
+            }
+        }).start();
+    }
+
+    private se.tcmt.aurora.provider.ProviderConfig createProviderConfig() {
+        se.tcmt.aurora.provider.ProviderConfig config = new se.tcmt.aurora.provider.ProviderConfig();
+        char[] pwd = apiKeyField.getPassword();
+        config.setApiKey(new String(pwd));
+        config.setBaseUrl(baseUrlField.getText());
+        config.setModel(modelField.getText());
+        config.setTemperature(((Double) temperatureSpinner.getValue()).doubleValue());
+        config.setMaxTokens((Integer) maxTokensSpinner.getValue());
+        return config;
+    }
+
     @Override
     public boolean isModified() {
         AuroraSettingsState settings = AuroraSettingsState.getInstance();
-        char[] pwd = ((JPasswordField) apiKeyField).getPassword();
+        char[] pwd = apiKeyField.getPassword();
         String key = new String(pwd);
         return !key.equals(settings.getApiKey())
             || !baseUrlField.getText().equals(settings.getBaseUrl())
@@ -104,13 +183,30 @@ public class AuroraSettingsConfigurable implements Configurable {
 
     @Override
     public void apply() {
+        // Validate before applying
+        char[] pwd = apiKeyField.getPassword();
+        String key = new String(pwd);
+        
+        if (key.isEmpty()) {
+            int result = Messages.showYesNoDialog(
+                "You are clearing the API key. Are you sure?",
+                "Aurora Settings",
+                Messages.getQuestionIcon()
+            );
+            if (result != Messages.YES) {
+                return;
+            }
+        }
+
         AuroraSettingsState settings = AuroraSettingsState.getInstance();
-        char[] pwd = ((JPasswordField) apiKeyField).getPassword();
-        settings.setApiKey(new String(pwd));
+        settings.setApiKey(key);
         settings.setBaseUrl(baseUrlField.getText());
         settings.setModel(modelField.getText());
         settings.setTemperature(((Double) temperatureSpinner.getValue()).doubleValue());
         settings.setMaxTokens((Integer) maxTokensSpinner.getValue());
+        
+        statusLabel.setText("Settings saved successfully");
+        statusLabel.setForeground(new Color(80, 200, 120));
     }
 
     @Override
@@ -121,6 +217,7 @@ public class AuroraSettingsConfigurable implements Configurable {
         modelField.setText(settings.getModel());
         temperatureSpinner.setValue(settings.getTemperature());
         maxTokensSpinner.setValue(settings.getMaxTokens());
+        statusLabel.setText("");
     }
 
     @Override
