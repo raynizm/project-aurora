@@ -3,102 +3,304 @@ package se.tcmt.aurora.chat;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
-import com.intellij.ui.components.JBScrollPane;
+import com.intellij.ui.jcef.JBCefBrowser;
+import com.intellij.ui.jcef.JBCefJSQuery;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
+import org.cef.handler.CefLoadHandlerAdapter;
+import org.cef.browser.CefFrame;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.KeyEvent;
-import java.awt.event.KeyAdapter;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
+/**
+ * Chat panel using JCEF WebView for rendering the Aurora chat UI.
+ * Follows the Roo-Code-JetBrains-CE pattern: JBCefBrowser + JBCefJSQuery bridge.
+ */
 public class AuroraChatPanel extends JPanel {
 
     private static final Logger LOG = Logger.getInstance(AuroraChatPanel.class);
 
-    private final JTextArea messageDisplay;
-    private final JTextField inputField;
-    private final JButton sendButton;
-    private final JLabel statusLabel;
-    private final List<ChatMessage> chatHistory = new ArrayList<>();
-    private volatile boolean isProcessing = false;
-
-    // Provider and config injected by tool window factory
-    private volatile se.tcmt.aurora.provider.AiProvider activeProvider;
-    private volatile se.tcmt.aurora.provider.ProviderConfig providerConfig;
-    
-    // Project reference for context extraction
     private final Project project;
     private volatile Editor currentEditor;
+    private volatile se.tcmt.aurora.provider.AiProvider activeProvider;
+    private volatile se.tcmt.aurora.settings.AuroraSettingsState settingsState;
+
+    // Chat history — tracked in Java for API calls (Roo-Code pattern)
+    private final List<ChatMessage> chatHistory = new CopyOnWriteArrayList<>();
+
+    // JCEF browser instance
+    private JBCefBrowser browser;
+    private JBCefJSQuery jsQuery;
 
     public AuroraChatPanel(@NotNull Project project) {
         this.project = project;
         setLayout(new BorderLayout());
-        setBorder(JBUI.Borders.empty(8));
+        setBackground(UIUtil.getPanelBackground());
 
-        // Message display area
-        messageDisplay = new JTextArea();
-        messageDisplay.setEditable(false);
-        messageDisplay.setFont(new Font("Monospaced", Font.PLAIN, 13));
-        messageDisplay.setLineWrap(true);
-        messageDisplay.setWrapStyleWord(true);
-        messageDisplay.setBackground(new Color(26, 30, 35));
-        messageDisplay.setForeground(new Color(204, 204, 204));
+        createWebView();
+    }
 
-        JBScrollPane scrollPane = new JBScrollPane(messageDisplay);
-        scrollPane.setBorder(null);
-        add(scrollPane, BorderLayout.CENTER);
+    /**
+     * Initialize the JCEF browser and load chat.html from resources.
+     */
+    private void createWebView() {
+        try {
+            String htmlContent = loadHtmlFromResources("chat.html");
 
-        // Input area panel
-        JPanel inputPanel = new JPanel(new BorderLayout(5, 5));
-        inputPanel.setBackground(new Color(31, 35, 40));
-        inputPanel.setBorder(JBUI.Borders.empty(8, 0, 0, 0));
-
-        inputField = new JTextField();
-        inputField.setFont(new Font("Monospaced", Font.PLAIN, 13));
-        inputField.setBackground(new Color(45, 50, 57));
-        inputField.setForeground(Color.WHITE);
-        inputField.setBorder(JBUI.Borders.empty(8, 12));
-
-        // Enter key sends message
-        inputField.addKeyListener(new KeyAdapter() {
-            @Override
-            public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode() == KeyEvent.VK_ENTER && !e.isShiftDown()) {
-                    e.consume();
-                    sendMessage();
-                }
+            if (htmlContent == null) {
+                LOG.error("Failed to load chat.html from resources");
+                add(createErrorPanel("Failed to load chat interface. Please check plugin resources."), BorderLayout.CENTER);
+                return;
             }
+
+            // Create JBCefBrowser using Roo-Code pattern
+            browser = JBCefBrowser.createBuilder()
+                    .setOffScreenRendering(false)
+                    .build();
+
+            // Set background color to match IDE theme (Roo-Code pattern)
+            browser.getComponent().setBackground(UIUtil.getPanelBackground());
+
+            // Set up JS bridge for receiving messages from JavaScript
+            setupJsBridge();
+
+            // Register load handler using CEF's native adapter (Roo-Code pattern)
+            browser.getJBCefClient().addLoadHandler(new CefLoadHandlerAdapter() {
+                @Override
+                public void onLoadEnd(org.cef.browser.CefBrowser cefBrowser, CefFrame frame, int httpStatusCode) {
+                    injectJsBridge();
+                }
+            }, browser.getCefBrowser());
+
+            browser.loadHTML(htmlContent);
+
+            add(browser.getComponent(), BorderLayout.CENTER);
+
+        } catch (Exception e) {
+            LOG.error("Failed to create WebView chat panel", e);
+            add(createErrorPanel("Failed to initialize chat: " + e.getMessage()), BorderLayout.CENTER);
+        }
+    }
+
+    /**
+     * Load HTML content from classpath resources.
+     */
+    @Nullable
+    private String loadHtmlFromResources(@NotNull String resourceName) {
+        try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(resourceName)) {
+            if (is == null) return null;
+            BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+            return sb.toString();
+        } catch (IOException e) {
+            LOG.error("Error loading resource: " + resourceName, e);
+            return null;
+        }
+    }
+
+    /**
+     * Set up the JBCefJSQuery to receive messages from JavaScript.
+     */
+    private void setupJsBridge() {
+        try {
+            jsQuery = JBCefJSQuery.create((com.intellij.ui.jcef.JBCefBrowserBase) browser);
+            jsQuery.addHandler(message -> {
+                handleMessageFromWebview(message);
+                return null;
+            });
+            LOG.debug("JCEF JS bridge setup successful");
+        } catch (Exception e) {
+            LOG.error("Failed to setup JCEF JS bridge", e);
+        }
+    }
+
+    /**
+     * Inject the sendMessageToPlugin function into the loaded page.
+     */
+    private void injectJsBridge() {
+        if (jsQuery == null) {
+            LOG.warn("JS query is null, cannot inject bridge");
+            return;
+        }
+
+        String jsQueryFunction = jsQuery.inject("msgStr");
+        if (jsQueryFunction != null) {
+            String script = """
+                window.Aurora = {
+                    postMessage: function(message) {
+                        try {
+                            const msgStr = JSON.stringify(message);
+                            %s;
+                        } catch (e) {
+                            console.warn("Failed to send message to plugin", e);
+                        }
+                    }
+                };
+                console.log("Aurora JCEF Bridge injected");
+            """.formatted(jsQueryFunction);
+
+            browser.getCefBrowser().executeJavaScript(script, browser.getCefBrowser().getURL(), 0);
+        } else {
+            LOG.warn("jsQuery inject returned null, cannot inject bridge");
+        }
+    }
+
+    /**
+     * Handle messages received from the webview JavaScript.
+     */
+    private void handleMessageFromWebview(@NotNull String message) {
+        try {
+            com.google.gson.JsonElement json = new com.google.gson.Gson().fromJson(message, com.google.gson.JsonElement.class);
+            com.google.gson.JsonObject obj = json.getAsJsonObject();
+
+            String type = obj.get("type").getAsString();
+
+            switch (type) {
+                case "message":
+                    handleUserMessage(obj.get("content").getAsString());
+                    break;
+                default:
+                    LOG.debug("Unknown message type from webview: " + type);
+            }
+        } catch (Exception e) {
+            LOG.error("Error handling message from webview", e);
+        }
+    }
+
+    /**
+     * Handle a user message sent from the webview.
+     */
+    private void handleUserMessage(@NotNull String text) {
+        if (text.isEmpty()) return;
+
+        // Track user message in history
+        ChatMessage userMsg = new ChatMessage(ChatMessage.Role.USER, text);
+        chatHistory.add(userMsg);
+
+        // Extract context from current editor
+        se.tcmt.aurora.context.CodeContextExtractor.Context context =
+                se.tcmt.aurora.context.CodeContextExtractor.extractContext(project, currentEditor);
+
+        String fullMessage = text;
+        if (context.hasContext()) {
+            fullMessage = context.formatForPrompt() + text;
+        }
+
+        // Send "thinking" status to webview
+        sendToWebview("{\"type\":\"status\",\"content\":\"Aurora is thinking...\"}");
+
+        // Process in background thread
+        new Thread(() -> {
+            try {
+                if (settingsState == null || !settingsState.getApiKey().isEmpty()) {
+                    // Check API key from settings
+                    String apiKey = settingsState != null ? settingsState.getApiKey() : "";
+                    if (apiKey.isEmpty()) {
+                        sendToWebview("{\"type\":\"error\",\"message\":\"Please configure your API key in Settings > Tools > Aurora.\"}");
+                        return;
+                    }
+
+                    // Build full history with context for this message
+                    List<ChatMessage> history = buildHistoryWithContext(context);
+
+                    if (activeProvider == null) {
+                        sendToWebview("{\"type\":\"error\",\"message\":\"No AI provider configured.\"}");
+                        return;
+                    }
+
+                    // Call provider and stream response
+                    String fullResponse = activeProvider.chat(history, settingsState.toProviderConfig());
+
+                    if (fullResponse != null && !fullResponse.isEmpty()) {
+                        // Track assistant message in history
+                        ChatMessage assistantMsg = new ChatMessage(ChatMessage.Role.ASSISTANT, fullResponse);
+                        chatHistory.add(assistantMsg);
+
+                        sendToWebview("{\"type\":\"response\",\"content\":" + escapeJson(fullResponse) + "}");
+                    } else {
+                        sendToWebview("{\"type\":\"error\",\"message\":\"Sorry, I couldn't get a response.\"}");
+                    }
+
+                } else {
+                    sendToWebview("{\"type\":\"error\",\"message\":\"Please configure your API key in Settings > Tools > Aurora.\"}");
+                }
+
+            } catch (Exception e) {
+                LOG.error("Error calling AI provider", e);
+                sendToWebview("{\"type\":\"error\",\"message\":" + escapeJson(e.getMessage()) + "}");
+            }
+        }).start();
+    }
+
+    /**
+     * Build chat history with context injected as a system message.
+     */
+    private List<ChatMessage> buildHistoryWithContext(se.tcmt.aurora.context.CodeContextExtractor.Context context) {
+        List<ChatMessage> history = new ArrayList<>(chatHistory);
+
+        // Inject context as a system message if available
+        if (context.hasContext()) {
+            String contextPrompt = "You are an AI coding assistant integrated into IntelliJ IDEA.\n\n" +
+                    "The user has the following code context available:\n" +
+                    context.formatForPrompt() + "\n\nPlease use this context when answering.";
+
+            ChatMessage systemMsg = new ChatMessage(ChatMessage.Role.SYSTEM, contextPrompt);
+            history.add(0, systemMsg); // Insert at beginning
+        }
+
+        return history;
+    }
+
+    /**
+     * Send a message to the webview JavaScript.
+     */
+    private void sendToWebview(@NotNull String jsonMessage) {
+        if (browser == null || browser.getCefBrowser() == null) return;
+
+        SwingUtilities.invokeLater(() -> {
+            String script = """
+                if (window.Aurora && window.Aurora.onMessage) {
+                    window.Aurora.onMessage(%s);
+                } else {
+                    console.warn("Aurora.onMessage not available");
+                }
+            """.formatted(jsonMessage);
+
+            browser.getCefBrowser().executeJavaScript(
+                    script,
+                    browser.getCefBrowser().getURL(),
+                    0
+            );
         });
+    }
 
-        sendButton = new JButton("Send");
-        sendButton.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        sendButton.setBackground(new Color(0, 150, 255));
-        sendButton.setForeground(Color.WHITE);
-        sendButton.setFocusPainted(false);
-        sendButton.setBorderPainted(false);
-        sendButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        sendButton.addActionListener(e -> sendMessage());
-
-        inputPanel.add(inputField, BorderLayout.CENTER);
-        inputPanel.add(sendButton, BorderLayout.EAST);
-        add(inputPanel, BorderLayout.SOUTH);
-
-        // Status label
-        statusLabel = new JLabel("Ready");
-        statusLabel.setForeground(new Color(120, 130, 140));
-        statusLabel.setBorder(JBUI.Borders.empty(4, 8));
-        add(statusLabel, BorderLayout.NORTH);
-
-        // Welcome message
-        appendMessage(ChatMessage.Role.ASSISTANT, "Welcome to Aurora! I'm your AI coding assistant. How can I help you today?");
+    /**
+     * Escape a string for safe JSON embedding.
+     */
+    private static String escapeJson(@NotNull String text) {
+        return "\"" + text.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t") + "\"";
     }
 
     /**
      * Set the current editor for context extraction.
-     * Called by the tool window when editor changes.
      */
     public void setCurrentEditor(@Nullable Editor editor) {
         this.currentEditor = editor;
@@ -108,96 +310,41 @@ public class AuroraChatPanel extends JPanel {
         this.activeProvider = provider;
     }
 
-    public void setProviderConfig(se.tcmt.aurora.provider.ProviderConfig config) {
-        this.providerConfig = config;
+    /**
+     * Set the settings state for dynamic configuration.
+     */
+    public void setSettingsState(se.tcmt.aurora.settings.AuroraSettingsState settings) {
+        this.settingsState = settings;
     }
 
-    private void sendMessage() {
-        String text = inputField.getText().trim();
-        if (text.isEmpty() || isProcessing) return;
-
-        inputField.setText("");
-        
-        // Extract context from current editor
-        se.tcmt.aurora.context.CodeContextExtractor.Context context = 
-            se.tcmt.aurora.context.CodeContextExtractor.extractContext(project, currentEditor);
-        
-        // Prepend context to user message if available
-        String fullMessage = text;
-        if (context.hasContext()) {
-            fullMessage = context.formatForPrompt() + text;
-            LOG.debug("Added code context to message");
-        }
-
-        appendMessage(ChatMessage.Role.USER, text);
-        chatHistory.add(new ChatMessage(ChatMessage.Role.USER, fullMessage));
-
-        // Show loading state
-        isProcessing = true;
-        sendButton.setEnabled(false);
-        statusLabel.setText("Aurora is thinking...");
-
-        // Send to AI provider in background thread
-        new Thread(() -> {
-            try {
-                if (providerConfig == null || !providerConfig.hasApiKey()) {
-                    SwingUtilities.invokeLater(() -> {
-                        appendMessage(ChatMessage.Role.ASSISTANT, "Please configure your API key in Settings > Tools > Aurora.");
-                        statusLabel.setText("Ready");
-                        isProcessing = false;
-                        sendButton.setEnabled(true);
-                    });
-                    return;
-                }
-
-                if (activeProvider == null) {
-                    SwingUtilities.invokeLater(() -> {
-                        appendMessage(ChatMessage.Role.ASSISTANT, "No AI provider configured.");
-                        statusLabel.setText("Ready");
-                        isProcessing = false;
-                        sendButton.setEnabled(true);
-                    });
-                    return;
-                }
-
-                String response = activeProvider.chat(chatHistory, providerConfig);
-
-                SwingUtilities.invokeLater(() -> {
-                    if (response != null && !response.isEmpty()) {
-                        appendMessage(ChatMessage.Role.ASSISTANT, response);
-                        chatHistory.add(new ChatMessage(ChatMessage.Role.ASSISTANT, response));
-                    } else {
-                        appendMessage(ChatMessage.Role.ASSISTANT, "Sorry, I couldn't get a response. Please check your API key and try again.");
-                    }
-                    statusLabel.setText("Ready");
-                    isProcessing = false;
-                    sendButton.setEnabled(true);
-                });
-            } catch (Exception e) {
-                LOG.error("Error calling AI provider: " + e.getMessage());
-                SwingUtilities.invokeLater(() -> {
-                    appendMessage(ChatMessage.Role.ASSISTANT, "Error: " + e.getMessage());
-                    statusLabel.setText("Ready");
-                    isProcessing = false;
-                    sendButton.setEnabled(true);
-                });
-            }
-        }).start();
-    }
-
-    private void appendMessage(@NotNull ChatMessage.Role role, @NotNull String content) {
-        SwingUtilities.invokeLater(() -> {
-            String prefix = role == ChatMessage.Role.USER ? "> " : "Aurora: ";
-            Color color = role == ChatMessage.Role.USER ? new Color(100, 180, 255) : new Color(204, 204, 204);
-
-            messageDisplay.append(prefix + content + "\n\n");
-            messageDisplay.setCaretPosition(messageDisplay.getDocument().getLength());
-        });
-    }
-
+    /**
+     * Clear the chat in the webview and reset history.
+     */
     public void clearChat() {
         chatHistory.clear();
-        SwingUtilities.invokeLater(() -> messageDisplay.setText(""));
-        appendMessage(ChatMessage.Role.ASSISTANT, "Chat cleared. How can I help you?");
+        sendToWebview("{\"type\":\"clear\"}");
+    }
+
+    /**
+     * Get the current chat history (for debugging/testing).
+     */
+    @NotNull
+    public List<ChatMessage> getChatHistory() {
+        return new ArrayList<>(chatHistory);
+    }
+
+    /**
+     * Create an error panel when WebView fails to load.
+     */
+    private JPanel createErrorPanel(@NotNull String message) {
+        JPanel panel = new JPanel(new BorderLayout(8, 8));
+        panel.setBorder(JBUI.Borders.empty(20));
+        panel.setBackground(Color.WHITE);
+
+        JLabel label = new JLabel("<html><div style='text-align:center;color:#7a7d80;'>" + message + "</div></html>");
+        label.setHorizontalAlignment(SwingConstants.CENTER);
+        panel.add(label, BorderLayout.CENTER);
+
+        return panel;
     }
 }
