@@ -1,13 +1,13 @@
 package se.tcmt.aurora.chat;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyAdapter;
 import java.util.ArrayList;
@@ -27,8 +27,13 @@ public class AuroraChatPanel extends JPanel {
     // Provider and config injected by tool window factory
     private volatile se.tcmt.aurora.provider.AiProvider activeProvider;
     private volatile se.tcmt.aurora.provider.ProviderConfig providerConfig;
+    
+    // Project reference for context extraction
+    private final Project project;
+    private volatile Editor currentEditor;
 
     public AuroraChatPanel(@NotNull Project project) {
+        this.project = project;
         setLayout(new BorderLayout());
         setBorder(JBUI.Borders.empty(8));
 
@@ -90,6 +95,14 @@ public class AuroraChatPanel extends JPanel {
         appendMessage(ChatMessage.Role.ASSISTANT, "Welcome to Aurora! I'm your AI coding assistant. How can I help you today?");
     }
 
+    /**
+     * Set the current editor for context extraction.
+     * Called by the tool window when editor changes.
+     */
+    public void setCurrentEditor(@Nullable Editor editor) {
+        this.currentEditor = editor;
+    }
+
     public void setActiveProvider(se.tcmt.aurora.provider.AiProvider provider) {
         this.activeProvider = provider;
     }
@@ -103,8 +116,20 @@ public class AuroraChatPanel extends JPanel {
         if (text.isEmpty() || isProcessing) return;
 
         inputField.setText("");
+        
+        // Extract context from current editor
+        se.tcmt.aurora.context.CodeContextExtractor.Context context = 
+            se.tcmt.aurora.context.CodeContextExtractor.extractContext(project, currentEditor);
+        
+        // Prepend context to user message if available
+        String fullMessage = text;
+        if (context.hasContext()) {
+            fullMessage = context.formatForPrompt() + text;
+            LOG.debug("Added code context to message");
+        }
+
         appendMessage(ChatMessage.Role.USER, text);
-        chatHistory.add(new ChatMessage(ChatMessage.Role.USER, text));
+        chatHistory.add(new ChatMessage(ChatMessage.Role.USER, fullMessage));
 
         // Show loading state
         isProcessing = true;
