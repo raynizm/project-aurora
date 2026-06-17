@@ -6,7 +6,6 @@ import com.intellij.testFramework.TestDataPath;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 import com.intellij.util.PsiErrorElementUtil;
 import org.jetbrains.annotations.NotNull;
-import se.tcmt.aurora.services.PluginService;
 
 @TestDataPath("$CONTENT_ROOT/src/test/testData")
 public class MyPluginTest extends BasePlatformTestCase {
@@ -25,12 +24,6 @@ public class MyPluginTest extends BasePlatformTestCase {
 
     public void testRename() {
         myFixture.testRename("foo.xml", "foo_after.xml", "a2");
-    }
-
-    public void testProjectService() {
-        PluginService projectService = getProject().getService(PluginService.class);
-
-        assertNotSame(projectService.getRandomNumber(), projectService.getRandomNumber());
     }
 
     @NotNull
