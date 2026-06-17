@@ -1,0 +1,5 @@
+{
+    "title": "Context-aware code suggestions from selected text",
+    "body": "# Context-Aware Code Suggestions\n\nAllow users to select code in the editor and send it to the AI assistant for context-aware responses.\n\n## Requirements\n- [ ] Detect selected text when user sends a message (Shift+Enter or custom shortcut)\n- [ ] Include file path, line numbers, and surrounding context in the prompt\n- [ ] Support multiple selection ranges\n- [ ] Show context indicator in chat input (e.g., \"📎 3 lines from Main.java\")\n- [ ] Respect max token limits when adding context\n\n## Acceptance Criteria\n- Selected code is included in API requests automatically\n- Context preview shows which files/lines are being sent\n- No performance degradation on large selections",
+    "labels": ["phase:2", "feature"]
+}
