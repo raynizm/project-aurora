@@ -14,6 +14,10 @@ import java.util.List;
 
 public class OpenAiProvider implements AiProvider {
 
+    private static final int MAX_RETRIES = 3;
+    private static final long INITIAL_RETRY_DELAY_MS = 1000L; // 1 second
+    private static final long MAX_RETRY_DELAY_MS = 30000L; // 30 seconds
+
     @Override
     public String getName() {
         return "OpenAI";
@@ -29,7 +33,7 @@ public class OpenAiProvider implements AiProvider {
     public String chat(@NotNull List<ChatMessage> history, @NotNull ProviderConfig config) throws Exception {
         if (!isConfigured(config)) {
             LOG.warn("OpenAI provider not configured (missing API key)");
-            return null;
+            throw new IllegalStateException("API key not configured. Please set it in Settings > Tools > Aurora.");
         }
 
         // Build messages array for OpenAI API
@@ -52,8 +56,61 @@ public class OpenAiProvider implements AiProvider {
         String requestBody = jsonBuilder.toString();
         LOG.info("OpenAI request: " + requestBody.substring(0, Math.min(200, requestBody.length())));
 
-        // Send HTTP POST request
-        URL url = new URL(config.getBaseUrl() + "/chat/completions");
+        // Retry loop with exponential backoff
+        Exception lastException = null;
+        long delayMs = INITIAL_RETRY_DELAY_MS;
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                String response = sendRequest(config.getBaseUrl() + "/chat/completions", requestBody, config);
+                
+                if (response != null) {
+                    return parseAssistantMessage(response);
+                }
+                
+                // If we got a null response but no exception, treat as transient error
+                throw new RuntimeException("Empty response from API");
+                
+            } catch (Exception e) {
+                lastException = e;
+                LOG.warn("OpenAI API attempt " + attempt + "/" + MAX_RETRIES + " failed: " + e.getMessage());
+                
+                // Check if we should retry (transient errors only)
+                if (!shouldRetry(e) || attempt == MAX_RETRIES) {
+                    break;
+                }
+                
+                // Wait before retrying with exponential backoff
+                try {
+                    Thread.sleep(Math.min(delayMs, MAX_RETRY_DELAY_MS));
+                    delayMs *= 2; // Exponential backoff
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Request interrupted", ie);
+                }
+            }
+        }
+
+        // All retries exhausted
+        LOG.error("OpenAI API failed after " + MAX_RETRIES + " attempts");
+        throw new RuntimeException("Failed to get response from AI provider: " + lastException.getMessage());
+    }
+
+    private boolean shouldRetry(@NotNull Exception e) {
+        String msg = e.getMessage();
+        if (msg == null) return false;
+        
+        // Retry on transient errors
+        return msg.contains("429") ||  // Rate limit
+               msg.contains("500") ||  // Server error
+               msg.contains("503") ||  // Service unavailable
+               msg.contains("timeout") ||
+               msg.contains("connection") ||
+               msg.contains("network");
+    }
+
+    private String sendRequest(@NotNull String urlString, @NotNull String requestBody, @NotNull ProviderConfig config) throws Exception {
+        URL url = new URL(urlString);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         try {
             conn.setRequestMethod("POST");
@@ -68,15 +125,21 @@ public class OpenAiProvider implements AiProvider {
             }
 
             int responseCode = conn.getResponseCode();
-            if (responseCode != 200) {
+            
+            // Handle non-200 responses with specific error messages
+            if (responseCode == 401) {
+                throw new RuntimeException("Authentication failed. Please check your API key.");
+            } else if (responseCode == 429) {
+                throw new RuntimeException("Rate limit exceeded. Please wait a moment and try again.");
+            } else if (responseCode >= 500) {
                 String error = readStream(conn.getErrorStream());
-                LOG.error("OpenAI API error: " + responseCode + " - " + error);
-                return null;
+                throw new RuntimeException("Server error (" + responseCode + "): " + error);
+            } else if (responseCode != 200) {
+                String error = readStream(conn.getErrorStream());
+                throw new RuntimeException("API error (" + responseCode + "): " + error);
             }
 
-            String response = readStream(conn.getInputStream());
-            // Parse the response to extract the assistant's message content
-            return parseAssistantMessage(response);
+            return readStream(conn.getInputStream());
         } finally {
             conn.disconnect();
         }
