@@ -1,8 +1,7 @@
-<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.github.raynizm.projectaurora</id>
-    <name>project-aurora</name>
-    <vendor>raynizm</vendor>
+    <id>project-aurora</id>
+    <name>Project Aurora</name>
+    <vendor>tcmt</vendor>
     <description><![CDATA[
         <p><b>project-aurora</b> is a repository that provides a pure template to make it easier to create a new plugin project.</p>
         <p>The main goal of this template is to speed up the setup phase of plugin development for both new and experienced developers by preconfiguring the project scaffold and CI, linking to the proper documentation pages, and keeping everything organized.</p>
@@ -13,7 +12,8 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.raynizm.projectaurora.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="com.github.raynizm.projectaurora.startup.MyProjectActivity" />
+        <toolWindow factoryClass="se.tcmt.aurora.toolwindow.PluginToolWindowFactory" id="Project Aurora"
+                    anchor="right"/>
+        <postStartupActivity implementation="se.tcmt.aurora.startup.PluginProjectActivity"/>
     </extensions>
 </idea-plugin>
