@@ -61,6 +61,21 @@ public class AuroraChatPanel extends JPanel {
     // Tool service — manages language model tools for function calling
     private se.tcmt.aurora.tool.ToolService toolService;
 
+    // Webview views service — manages side panel webviews
+    private se.tcmt.aurora.webview.WebviewViewsService webviewViewsService;
+
+    // Secret state service — manages secure storage
+    private se.tcmt.aurora.secret.SecretStateService secretStateService;
+
+    // Telemetry service — logs events and metrics
+    private se.tcmt.aurora.telemetry.TelemetryService telemetryService;
+
+    // Logger service — manages log files and output channels
+    private se.tcmt.aurora.logger.LoggerService loggerService;
+
+    // Output channel service — manages IDE output channels
+    private se.tcmt.aurora.logger.OutputChannelService outputChannelService;
+
     public AuroraChatPanel(@NotNull Project project) {
         this.project = project;
         setLayout(new BorderLayout());
@@ -72,6 +87,11 @@ public class AuroraChatPanel extends JPanel {
         initSearchService();
         initClipboardService();
         initToolService();
+        initWebviewViewsService();
+        initSecretStateService();
+        initTelemetryService();
+        initLoggerService();
+        initOutputChannelService();
     }
 
     /**
@@ -212,6 +232,21 @@ public class AuroraChatPanel extends JPanel {
                 case "tool":
                     handleToolCommand(obj);
                     break;
+                case "webview":
+                    handleWebviewCommand(obj);
+                    break;
+                case "secret":
+                    handleSecretCommand(obj);
+                    break;
+                case "telemetry":
+                    handleTelemetryCommand(obj);
+                    break;
+                case "logger":
+                    handleLoggerCommand(obj);
+                    break;
+                case "output":
+                    handleOutputCommand(obj);
+                    break;
                 default:
                     LOG.debug("Unknown message type from webview: " + type);
             }
@@ -295,6 +330,66 @@ public class AuroraChatPanel extends JPanel {
             LOG.debug("ToolService initialized with " + toolService.getToolCount() + " tools");
         } catch (Exception e) {
             LOG.error("Failed to initialize ToolService", e);
+        }
+    }
+
+    /**
+     * Initialize webview views service for side panel functionality.
+     */
+    private void initWebviewViewsService() {
+        try {
+            webviewViewsService = new se.tcmt.aurora.webview.WebviewViewsService(project);
+            LOG.debug("WebviewViewsService initialized");
+        } catch (Exception e) {
+            LOG.error("Failed to initialize WebviewViewsService", e);
+        }
+    }
+
+    /**
+     * Initialize secret state service for secure storage.
+     */
+    private void initSecretStateService() {
+        try {
+            secretStateService = new se.tcmt.aurora.secret.SecretStateService();
+            LOG.debug("SecretStateService initialized");
+        } catch (Exception e) {
+            LOG.error("Failed to initialize SecretStateService", e);
+        }
+    }
+
+    /**
+     * Initialize telemetry service for event logging.
+     */
+    private void initTelemetryService() {
+        try {
+            telemetryService = new se.tcmt.aurora.telemetry.TelemetryService();
+            LOG.debug("TelemetryService initialized");
+        } catch (Exception e) {
+            LOG.error("Failed to initialize TelemetryService", e);
+        }
+    }
+
+    /**
+     * Initialize logger service for log file management.
+     */
+    private void initLoggerService() {
+        try {
+            loggerService = new se.tcmt.aurora.logger.LoggerService();
+            LOG.debug("LoggerService initialized");
+        } catch (Exception e) {
+            LOG.error("Failed to initialize LoggerService", e);
+        }
+    }
+
+    /**
+     * Initialize output channel service for IDE output channels.
+     */
+    private void initOutputChannelService() {
+        try {
+            outputChannelService = new se.tcmt.aurora.logger.OutputChannelService();
+            LOG.debug("OutputChannelService initialized");
+        } catch (Exception e) {
+            LOG.error("Failed to initialize OutputChannelService", e);
         }
     }
 
@@ -827,6 +922,498 @@ public class AuroraChatPanel extends JPanel {
                 LOG.error("[Tool] Error invoking tool '" + toolId + "'", e);
             }
         }).start();
+    }
+
+    /**
+     * Handle webview command from JS query.
+     */
+    private void handleWebviewCommand(@NotNull com.google.gson.JsonObject obj) {
+        if (webviewViewsService == null) {
+            sendToWebview("{\"type\":\"error\",\"message\":\"Webview views service not available\"}");
+            return;
+        }
+
+        try {
+            String action = obj.has("action") ? obj.get("action").getAsString() : "";
+
+            switch (action) {
+                case "register":
+                    handleRegisterWebview(obj);
+                    break;
+                case "setTitle":
+                    handleSetWebviewTitle(obj);
+                    break;
+                case "setDescription":
+                    handleSetWebviewDescription(obj);
+                    break;
+                case "show":
+                    handleShowWebview(obj);
+                    break;
+                default:
+                    LOG.debug("Unknown webview action: " + action);
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to handle webview command", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to handle webview command: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle register webview view command.
+     */
+    private void handleRegisterWebview(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String viewType = obj.has("viewType") ? obj.get("viewType").getAsString() : "";
+            
+            if (viewType.isEmpty()) {
+                sendToWebview("{\"type\":\"error\",\"message\":\"View type is required\"}");
+                return;
+            }
+
+            // Parse extension data and options from the request
+            com.google.gson.JsonObject extensionData = obj.has("extension") ? 
+                    obj.getAsJsonObject("extension") : new com.google.gson.JsonObject();
+            
+            com.google.gson.JsonObject options = obj.has("options") ? 
+                    obj.getAsJsonObject("options") : new com.google.gson.JsonObject();
+
+            // Convert JSON objects to Maps for WebviewViewProviderData
+            Map<String, Object> extensionMap = convertJsonToMap(extensionData);
+            Map<String, Object> optionsMap = convertJsonToMap(options);
+
+            se.tcmt.aurora.webview.WebviewViewProviderData providerData = 
+                    new se.tcmt.aurora.webview.WebviewViewProviderData(
+                            extensionMap, viewType, optionsMap);
+
+            webviewViewsService.registerProvider(providerData);
+            
+            sendToWebview("{\"type\":\"webviewRegistered\",\"viewType\":\"" + escapeJson(viewType) + "\"}");
+            LOG.debug("Registered webview view: " + viewType);
+        } catch (Exception e) {
+            LOG.error("Failed to register webview", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to register webview: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle set webview title command.
+     */
+    private void handleSetWebviewTitle(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String handle = obj.has("handle") ? obj.get("handle").getAsString() : "";
+            String title = obj.has("title") && !obj.get("title").isJsonNull() ? 
+                    obj.get("title").getAsString() : null;
+
+            webviewViewsService.setViewTitle(handle, title);
+            
+            sendToWebview("{\"type\":\"webviewTitleSet\",\"handle\":\"" + escapeJson(handle) + "\"}");
+        } catch (Exception e) {
+            LOG.error("Failed to set webview title", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to set webview title: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle set webview description command.
+     */
+    private void handleSetWebviewDescription(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String handle = obj.has("handle") ? obj.get("handle").getAsString() : "";
+            String description = obj.has("description") && !obj.get("description").isJsonNull() ? 
+                    obj.get("description").getAsString() : null;
+
+            webviewViewsService.setViewDescription(handle, description);
+            
+            sendToWebview("{\"type\":\"webviewDescriptionSet\",\"handle\":\"" + escapeJson(handle) + "\"}");
+        } catch (Exception e) {
+            LOG.error("Failed to set webview description", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to set webview description: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle show webview command.
+     */
+    private void handleShowWebview(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String handle = obj.has("handle") ? obj.get("handle").getAsString() : "";
+            boolean preserveFocus = obj.has("preserveFocus") && !obj.get("preserveFocus").isJsonNull() ? 
+                    obj.get("preserveFocus").getAsBoolean() : false;
+
+            webviewViewsService.showView(handle, preserveFocus);
+            
+            sendToWebview("{\"type\":\"webviewShown\",\"handle\":\"" + escapeJson(handle) + "\"}");
+        } catch (Exception e) {
+            LOG.error("Failed to show webview", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to show webview: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle secret command from JS query.
+     */
+    private void handleSecretCommand(@NotNull com.google.gson.JsonObject obj) {
+        if (secretStateService == null) {
+            sendToWebview("{\"type\":\"error\",\"message\":\"Secret state service not available\"}");
+            return;
+        }
+
+        try {
+            String action = obj.has("action") ? obj.get("action").getAsString() : "";
+            String extensionId = obj.has("extensionId") ? obj.get("extensionId").getAsString() : "";
+            String key = obj.has("key") ? obj.get("key").getAsString() : "";
+
+            switch (action) {
+                case "get":
+                    handleGetSecret(extensionId, key);
+                    break;
+                case "set":
+                    String value = obj.has("value") && !obj.get("value").isJsonNull() ? 
+                            obj.get("value").getAsString() : "";
+                    handleSetSecret(extensionId, key, value);
+                    break;
+                case "delete":
+                    handleDeleteSecret(extensionId, key);
+                    break;
+                default:
+                    LOG.debug("Unknown secret action: " + action);
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to handle secret command", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to handle secret command: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle get secret command.
+     */
+    private void handleGetSecret(@NotNull String extensionId, @NotNull String key) {
+        try {
+            String value = secretStateService.getPassword(extensionId, key);
+            
+            if (value != null) {
+                sendToWebview("{\"type\":\"secretRetrieved\",\"extensionId\":\"" + escapeJson(extensionId) + 
+                        "\",\"key\":\"" + escapeJson(key) + "\",\"value\":\"" + escapeJson(value) + "\"}");
+            } else {
+                sendToWebview("{\"type\":\"secretNotFound\",\"extensionId\":\"" + escapeJson(extensionId) + 
+                        "\",\"key\":\"" + escapeJson(key) + "\"}");
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to get secret", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to get secret: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle set secret command.
+     */
+    private void handleSetSecret(@NotNull String extensionId, @NotNull String key, 
+                                  @NotNull String value) {
+        try {
+            secretStateService.setPassword(extensionId, key, value);
+            
+            sendToWebview("{\"type\":\"secretStored\",\"extensionId\":\"" + escapeJson(extensionId) + 
+                    "\",\"key\":\"" + escapeJson(key) + "\"}");
+        } catch (Exception e) {
+            LOG.error("Failed to set secret", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to set secret: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle delete secret command.
+     */
+    private void handleDeleteSecret(@NotNull String extensionId, @NotNull String key) {
+        try {
+            secretStateService.deletePassword(extensionId, key);
+            
+            sendToWebview("{\"type\":\"secretDeleted\",\"extensionId\":\"" + escapeJson(extensionId) + 
+                    "\",\"key\":\"" + escapeJson(key) + "\"}");
+        } catch (Exception e) {
+            LOG.error("Failed to delete secret", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to delete secret: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle telemetry command from JS query.
+     */
+    private void handleTelemetryCommand(@NotNull com.google.gson.JsonObject obj) {
+        if (telemetryService == null) {
+            sendToWebview("{\"type\":\"error\",\"message\":\"Telemetry service not available\"}");
+            return;
+        }
+
+        try {
+            String action = obj.has("action") ? obj.get("action").getAsString() : "";
+
+            switch (action) {
+                case "log":
+                    handleLogEvent(obj);
+                    break;
+                default:
+                    LOG.debug("Unknown telemetry action: " + action);
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to handle telemetry command", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to handle telemetry command: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle log event command.
+     */
+    private void handleLogEvent(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String eventName = obj.has("eventName") ? obj.get("eventName").getAsString() : "";
+            
+            if (eventName.isEmpty()) {
+                sendToWebview("{\"type\":\"error\",\"message\":\"Event name is required\"}");
+                return;
+            }
+
+            // Convert optional data to Map
+            Map<String, Object> eventData = null;
+            if (obj.has("data") && !obj.get("data").isJsonNull()) {
+                eventData = convertJsonToMap(obj.getAsJsonObject("data"));
+            }
+
+            telemetryService.publicLog(eventName, eventData);
+            
+            sendToWebview("{\"type\":\"eventLogged\",\"eventName\":\"" + escapeJson(eventName) + "\"}");
+        } catch (Exception e) {
+            LOG.error("Failed to log event", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to log event: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle logger command from JS query.
+     */
+    private void handleLoggerCommand(@NotNull com.google.gson.JsonObject obj) {
+        if (loggerService == null) {
+            sendToWebview("{\"type\":\"error\",\"message\":\"Logger service not available\"}");
+            return;
+        }
+
+        try {
+            String action = obj.has("action") ? obj.get("action").getAsString() : "";
+
+            switch (action) {
+                case "log":
+                    handleLogToFile(obj);
+                    break;
+                case "createLogger":
+                    handleCreateLogger(obj);
+                    break;
+                default:
+                    LOG.debug("Unknown logger action: " + action);
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to handle logger command", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to handle logger command: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle log to file command.
+     */
+    private void handleLogToFile(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String filePath = obj.has("filePath") ? obj.get("filePath").getAsString() : "";
+            
+            if (filePath.isEmpty()) {
+                sendToWebview("{\"type\":\"error\",\"message\":\"File path is required\"}");
+                return;
+            }
+
+            // Parse messages array
+            List<String> messages = new ArrayList<>();
+            if (obj.has("messages") && obj.get("messages").isJsonArray()) {
+                com.google.gson.JsonArray msgArray = obj.getAsJsonArray("messages");
+                for (com.google.gson.JsonElement elem : msgArray) {
+                    messages.add(elem.getAsString());
+                }
+            }
+
+            loggerService.logToFile(filePath, messages);
+            
+            sendToWebview("{\"type\":\"logged\",\"filePath\":\"" + escapeJson(filePath) + 
+                    "\",\"messageCount\":" + messages.size() + "}");
+        } catch (Exception e) {
+            LOG.error("Failed to log to file", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to log to file: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle create logger command.
+     */
+    private void handleCreateLogger(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String name = obj.has("name") ? obj.get("name").getAsString() : "";
+            
+            if (name.isEmpty()) {
+                sendToWebview("{\"type\":\"error\",\"message\":\"Logger name is required\"}");
+                return;
+            }
+
+            // Convert options to Map
+            Map<String, Object> options = null;
+            if (obj.has("options") && !obj.get("options").isJsonNull()) {
+                options = convertJsonToMap(obj.getAsJsonObject("options"));
+            }
+
+            se.tcmt.aurora.logger.LoggerService.LogChannel channel = 
+                    loggerService.createLogger(name, options);
+
+            if (channel != null) {
+                sendToWebview("{\"type\":\"loggerCreated\",\"name\":\"" + escapeJson(name) + "\"}");
+            } else {
+                sendToWebview("{\"type\":\"error\",\"message\":\"Failed to create logger: " + name + "\"}");
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to create logger", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to create logger: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle output command from JS query.
+     */
+    private void handleOutputCommand(@NotNull com.google.gson.JsonObject obj) {
+        if (outputChannelService == null) {
+            sendToWebview("{\"type\":\"error\",\"message\":\"Output channel service not available\"}");
+            return;
+        }
+
+        try {
+            String action = obj.has("action") ? obj.get("action").getAsString() : "";
+
+            switch (action) {
+                case "register":
+                    handleRegisterOutputChannel(obj);
+                    break;
+                case "reveal":
+                    handleRevealOutputChannel(obj);
+                    break;
+                case "close":
+                    handleCloseOutputChannel(obj);
+                    break;
+                default:
+                    LOG.debug("Unknown output action: " + action);
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to handle output command", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to handle output command: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle register output channel command.
+     */
+    private void handleRegisterOutputChannel(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String label = obj.has("label") ? obj.get("label").getAsString() : "";
+            String extensionId = obj.has("extensionId") ? obj.get("extensionId").getAsString() : "";
+
+            if (label.isEmpty()) {
+                sendToWebview("{\"type\":\"error\",\"message\":\"Label is required\"}");
+                return;
+            }
+
+            // Parse file components and language ID from the request
+            Map<String, Object> fileComponents = null;
+            if (obj.has("file") && !obj.get("file").isJsonNull()) {
+                fileComponents = convertJsonToMap(obj.getAsJsonObject("file"));
+            }
+
+            String languageId = obj.has("languageId") && !obj.get("languageId").isJsonNull() ? 
+                    obj.get("languageId").getAsString() : null;
+
+            String channelId = outputChannelService.register(label, fileComponents, languageId, extensionId);
+            
+            sendToWebview("{\"type\":\"outputChannelRegistered\",\"channelId\":\"" + escapeJson(channelId) + 
+                    "\",\"label\":\"" + escapeJson(label) + "\"}");
+        } catch (Exception e) {
+            LOG.error("Failed to register output channel", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to register output channel: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle reveal output channel command.
+     */
+    private void handleRevealOutputChannel(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String channelId = obj.has("channelId") ? obj.get("channelId").getAsString() : "";
+            boolean preserveFocus = obj.has("preserveFocus") && !obj.get("preserveFocus").isJsonNull() ? 
+                    obj.get("preserveFocus").getAsBoolean() : false;
+
+            outputChannelService.reveal(channelId, preserveFocus);
+            
+            sendToWebview("{\"type\":\"outputChannelRevealed\",\"channelId\":\"" + escapeJson(channelId) + "\"}");
+        } catch (Exception e) {
+            LOG.error("Failed to reveal output channel", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to reveal output channel: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Handle close output channel command.
+     */
+    private void handleCloseOutputChannel(@NotNull com.google.gson.JsonObject obj) {
+        try {
+            String channelId = obj.has("channelId") ? obj.get("channelId").getAsString() : "";
+
+            outputChannelService.close(channelId);
+            
+            sendToWebview("{\"type\":\"outputChannelClosed\",\"channelId\":\"" + escapeJson(channelId) + "\"}");
+        } catch (Exception e) {
+            LOG.error("Failed to close output channel", e);
+            sendToWebview("{\"type\":\"error\",\"message\":\"Failed to close output channel: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
+    /**
+     * Convert a JsonObject to a Map<String, Object> for service methods.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> convertJsonToMap(com.google.gson.JsonObject json) {
+        Map<String, Object> map = new java.util.HashMap<>();
+        for (java.util.Map.Entry<String, com.google.gson.JsonElement> entry : json.entrySet()) {
+            com.google.gson.JsonElement elem = entry.getValue();
+            if (elem.isJsonPrimitive()) {
+                com.google.gson.JsonPrimitive prim = elem.getAsJsonPrimitive();
+                if (prim.isBoolean()) {
+                    map.put(entry.getKey(), prim.getAsBoolean());
+                } else if (prim.isNumber()) {
+                    map.put(entry.getKey(), prim.getAsNumber());
+                } else {
+                    map.put(entry.getKey(), prim.getAsString());
+                }
+            } else if (elem.isJsonObject()) {
+                map.put(entry.getKey(), convertJsonToMap(elem.getAsJsonObject()));
+            } else if (elem.isJsonArray()) {
+                java.util.List<Object> list = new java.util.ArrayList<>();
+                for (com.google.gson.JsonElement arrElem : elem.getAsJsonArray()) {
+                    if (arrElem.isJsonPrimitive()) {
+                        com.google.gson.JsonPrimitive prim = arrElem.getAsJsonPrimitive();
+                        if (prim.isBoolean()) {
+                            list.add(prim.getAsBoolean());
+                        } else if (prim.isNumber()) {
+                            list.add(prim.getAsNumber());
+                        } else {
+                            list.add(prim.getAsString());
+                        }
+                    } else if (arrElem.isJsonObject()) {
+                        list.add(convertJsonToMap(arrElem.getAsJsonObject()));
+                    }
+                }
+                map.put(entry.getKey(), list);
+            }
+        }
+        return map;
     }
 
     /**
