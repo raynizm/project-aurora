@@ -52,23 +52,17 @@
             <action id="Aurora.ExplainCode"
                     class="se.tcmt.aurora.actions.ExplainCodeAction"
                     text="Explain Code"
-                    description="Explain the selected code using Aurora AI">
-                <add-to-group group-id="Aurora.CodeActions" anchor="first"/>
-            </action>
+                    description="Explain the selected code using Aurora AI"/>
             
             <action id="Aurora.FixCode"
                     class="se.tcmt.aurora.actions.FixCodeAction"
                     text="Fix Issues"
-                    description="Fix issues in the selected code using Aurora AI">
-                <add-to-group group-id="Aurora.CodeActions"/>
-            </action>
+                    description="Fix issues in the selected code using Aurora AI"/>
             
             <action id="Aurora.ImproveCode"
                     class="se.tcmt.aurora.actions.ImproveCodeAction"
                     text="Improve Code"
-                    description="Improve the selected code using Aurora AI">
-                <add-to-group group-id="Aurora.CodeActions"/>
-            </action>
+                    description="Improve the selected code using Aurora AI"/>
         </group>
     </actions>
 </idea-plugin>
